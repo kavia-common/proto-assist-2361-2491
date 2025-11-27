@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Node-based entrypoint shim for environments that expect a JavaScript main.
- * Starts the lightweight health server on port 5001.
+ * Starts the lightweight health server on port 5001, never invokes `postgres` directly.
  */
 
 // PUBLIC_INTERFACE
