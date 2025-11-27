@@ -97,7 +97,7 @@ start_postgres() {
 
   # Wait for readiness (best effort)
   echo "[Database] Waiting for Postgres to become ready..."
-  for i in {1..20}; do
+  for i in {1..40}; do
     if "${PG_ISREADY}" -p "${DB_PORT}" >/dev/null 2>&1; then
       echo "[Database] Postgres is ready."
       break
@@ -128,6 +128,21 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO ${DB_USER};
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO ${DB_USER};
 EOF
   } || echo "[Database] Non-fatal: Failed to fully configure DB/user."
+
+  # Apply SQL migrations if available
+  MIGRATIONS_DIR="${BASE_DIR}/sql"
+  if [ -d "${MIGRATIONS_DIR}" ]; then
+    echo "[Database] Applying SQL migrations from ${MIGRATIONS_DIR}..."
+    # Apply in lexical order: 001_*.sql, 002_*.sql, etc.
+    for f in $(ls "${MIGRATIONS_DIR}"/*.sql 2>/dev/null | sort); do
+      echo "  - Running $(basename "$f")"
+      "${PSQL_BIN}" -v ON_ERROR_STOP=1 -p "${DB_PORT}" -d "${DB_NAME}" -f "$f" \
+        || { echo "[Database] ERROR applying migration: $f"; kill ${PG_PID}; exit 1; }
+    done
+    echo "[Database] Migrations applied successfully."
+  else
+    echo "[Database] No migrations directory found at ${MIGRATIONS_DIR} (skipping)."
+  fi
 
   # Write connection helpers
   echo "psql postgresql://${DB_USER}:${DB_PASSWORD}@localhost:${DB_PORT}/${DB_NAME}" > "${BASE_DIR}/db_connection.txt"

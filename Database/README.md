@@ -51,6 +51,7 @@ Steps:
    - Initializes a data directory if needed (Database/.pgdata)
    - Starts PostgreSQL on port 5001
    - Creates database and user with appropriate privileges
+   - Applies SQL migrations from Database/sql in lexical order (001_init.sql, 002_indexes.sql, 003_seed.sql)
    - Saves a connection string to db_connection.txt
    - Saves environment variables to db_visualizer/postgres.env
 
@@ -59,7 +60,26 @@ psql -h localhost -U appuser -d myapp -p 5001
 or:
 $(cat db_connection.txt)
 
-To populate from the provided dump:
+### Database migrations (plain SQL)
+
+This project uses plain SQL files—no external migration tooling.
+
+- Location: Database/sql/
+  - 001_init.sql     — creates tables, constraints, and extensions (safe IF NOT EXISTS).
+  - 002_indexes.sql  — creates indexes for common queries.
+  - 003_seed.sql     — optional seed data for local development.
+
+How they are applied:
+- Database/startup.sh detects if `postgres` is available.
+- If yes, it starts PostgreSQL, ensures DB and user exist, then sequentially applies all .sql files in Database/sql using psql with ON_ERROR_STOP=1.
+- If `postgres` is not available, the container runs a placeholder health server and no migrations are applied.
+
+Manual application (if DB is already running):
+PGPASSWORD="dbuser123" psql -h localhost -p 5001 -U appuser -d myapp -f Database/sql/001_init.sql
+PGPASSWORD="dbuser123" psql -h localhost -p 5001 -U appuser -d myapp -f Database/sql/002_indexes.sql
+PGPASSWORD="dbuser123" psql -h localhost -p 5001 -U appuser -d myapp -f Database/sql/003_seed.sql
+
+To populate from the provided dump (alternative to migrations):
 PGPASSWORD="dbuser123" psql -h localhost -p 5001 -U appuser -d postgres < database_backup.sql
 
 ## Connection details used by BackendAPI
