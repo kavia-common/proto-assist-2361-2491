@@ -7,3 +7,4 @@ chmod +x "${BASE_DIR}/server.sh" || true
 chmod +x "${BASE_DIR}/index.js" || true
 chmod +x "${BASE_DIR}/scripts/health.js" || true
 echo "[Database] Executable bits ensured."
+ls -l "${BASE_DIR}/startup.sh" "${BASE_DIR}/server.sh" "${BASE_DIR}/index.js" "${BASE_DIR}/scripts/health.js" 2>/dev/null || true

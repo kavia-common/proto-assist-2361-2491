@@ -46,6 +46,7 @@ keep_alive() {
 }
 
 start_health() {
+  echo "[Database] [BRANCH] Health server path selected (postgres not found)."
   echo "[Database] Launching placeholder health server on port ${DB_HEALTH_PORT}..."
   if command -v node >/dev/null 2>&1; then
     # Prefer minimal health.js for lightweight footprint
@@ -76,6 +77,7 @@ start_health() {
 }
 
 start_postgres() {
+  echo "[Database] [BRANCH] Postgres path selected (postgres detected in PATH)."
   echo "[Database] postgres detected. Starting real PostgreSQL on port ${DB_PORT} using data dir: ${DATA_DIR}"
 
   # Discover binaries
@@ -110,14 +112,14 @@ start_postgres() {
   {
     "${CREATEDB_BIN}" -p "${DB_PORT}" "${DB_NAME}" 2>/dev/null || true
     "${PSQL_BIN}" -p "${DB_PORT}" -d postgres <<EOF
-DO \$\$
+DO $$ 
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN
     CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASSWORD}';
   END IF;
   ALTER ROLE ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';
 END
-\$\$;
+$$;
 GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
 \c ${DB_NAME}
 GRANT USAGE, CREATE ON SCHEMA public TO ${DB_USER};
@@ -165,7 +167,7 @@ EOF
 if command -v postgres >/dev/null 2>&1; then
   start_postgres
 else
-  echo "[Database] postgres not found. Running placeholder health server on port ${DB_HEALTH_PORT}."
+  echo "[Database] postgres not found on PATH."
   echo "[Database] To run a real database locally, see Database/README.md."
   # Do not crash the container even if health server cannot start.
   set +e
