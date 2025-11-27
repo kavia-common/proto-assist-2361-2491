@@ -7,6 +7,7 @@
 #    - If Node is missing, try nc on port 5001, else keep container alive via tail -f /dev/null.
 # Notes:
 # - This script is intended to be the entrypoint for preview mode.
+# - IMPORTANT: We never unconditionally invoke postgres; detection is performed via `command -v postgres`.
 
 set -euo pipefail
 

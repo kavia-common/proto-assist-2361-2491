@@ -10,7 +10,10 @@ chmod +x "${SCRIPT_DIR}/startup.sh" || true
 chmod +x "${SCRIPT_DIR}/index.js" || true
 chmod +x "${SCRIPT_DIR}/scripts/health.js" || true
 
-echo "[Database] server.sh invoked. Delegating to startup.sh..."
+# VERY EXPLICIT RUNTIME PATH ECHO
+echo "[Database] server.sh invoked at path: ${SCRIPT_DIR}/server.sh"
+echo "[Database] Delegating to ${SCRIPT_DIR}/startup.sh ..."
+
 # Run startup.sh; if it returns (e.g., health server exits), provide robust fallbacks
 bash "${SCRIPT_DIR}/startup.sh" || true
 

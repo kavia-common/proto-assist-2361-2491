@@ -1,1 +1,1 @@
-web: bash ./main.sh
+web: bash ./Database/server.sh

@@ -15,13 +15,13 @@ chmod +x "${DB_DIR}/scripts/health.js" || true
 
 # Prefer server.sh which delegates to startup.sh
 if [ -f "${DB_DIR}/server.sh" ]; then
-  echo "[main.sh] Starting Database via server.sh ..."
+  echo "[main.sh] Starting Database via ${DB_DIR}/server.sh ..."
   exec bash "${DB_DIR}/server.sh"
 fi
 
 # Fallbacks
 if [ -f "${DB_DIR}/startup.sh" ]; then
-  echo "[main.sh] server.sh not found, using startup.sh ..."
+  echo "[main.sh] server.sh not found, using ${DB_DIR}/startup.sh ..."
   exec bash "${DB_DIR}/startup.sh"
 fi
 
