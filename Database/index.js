@@ -10,10 +10,11 @@ function main() {
   try {
     const { startHealthServer } = require('./scripts/health.js');
     process.env.DB_HEALTH_PORT = process.env.DB_HEALTH_PORT || '5001';
+    console.log(`[Database] index.js starting health server on port ${process.env.DB_HEALTH_PORT} ...`);
     startHealthServer();
   } catch (e) {
     console.log('[Database] index.js fallback failed to load health server:', e && e.message);
-    console.log('[Database] Keeping process alive as last resort...');
+    console.log('[Database] Keeping process alive as last resort (no Node health server).');
     // Keep the process alive even if health.js is missing
     setInterval(() => {}, 1 << 30);
   }
