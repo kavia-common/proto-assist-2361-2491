@@ -1,0 +1,3 @@
+Ensure startup.sh is executable in your environment:
+  chmod +x Database/startup.sh
+  chmod +x Database/server.sh

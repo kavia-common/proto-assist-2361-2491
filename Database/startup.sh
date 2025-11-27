@@ -1,192 +1,139 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 # Database container startup with safe guards and placeholder fallback.
-# If postgres binary is missing, start a lightweight HTTP health server on port 5001.
+# Behavior:
+# 1) If `postgres` exists in PATH, start it on port 5001 using a data dir.
+# 2) If not, start the lightweight health server on port 5001.
+# 3) Guards:
+#    - If Node is missing, try nc on port 5001, else keep container alive via tail -f /dev/null.
+# Notes:
+# - This script is intended to be the entrypoint for preview mode.
 
-set -e
+set -euo pipefail
 
-DB_NAME="myapp"
-DB_USER="appuser"
-DB_PASSWORD="dbuser123"
-DB_PORT="${DB_PORT:-5000}"
+DB_NAME="${DB_NAME:-myapp}"
+DB_USER="${DB_USER:-appuser}"
+DB_PASSWORD="${DB_PASSWORD:-dbuser123}"
+
+# In preview we standardize on 5001 per task requirement
+DB_PORT="${DB_PORT:-5001}"
 DB_HEALTH_PORT="${DB_HEALTH_PORT:-5001}"
 
-echo "Starting Database container..."
+echo "[Database] Startup initializing..."
+echo "[Database] Desired port: ${DB_PORT} (DB) / ${DB_HEALTH_PORT} (health)"
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HEALTH_JS="${BASE_DIR}/scripts/health.js"
 VIEWER_DIR="${BASE_DIR}/db_visualizer"
+DATA_DIR="${DATA_DIR:-${BASE_DIR}/.pgdata}"
 
-start_health() {
-  echo "Launching placeholder health server on port ${DB_HEALTH_PORT}..."
-  if command -v node >/dev/null 2>&1; then
-    # Prefer db_visualizer/server.js if present (Express app)
-    if [ -f "${VIEWER_DIR}/server.js" ]; then
-      echo "Found db_visualizer/server.js. Starting as lightweight server..."
-      PORT="${DB_HEALTH_PORT}" node "${VIEWER_DIR}/server.js" >/dev/null 2>&1 &
-      echo $! > "${BASE_DIR}/.health_server.pid"
-      echo "Health server started (db_visualizer) with PID $(cat "${BASE_DIR}/.health_server.pid")"
-      return 0
-    fi
+mkdir -p "${DATA_DIR}"
 
-    # Fallback to scripts/health.js
-    if [ -f "${HEALTH_JS}" ]; then
-      DB_HEALTH_PORT="${DB_HEALTH_PORT}" node "${HEALTH_JS}" >/dev/null 2>&1 &
-      echo $! > "${BASE_DIR}/.health_server.pid"
-      echo "Health server started (health.js) with PID $(cat "${BASE_DIR}/.health_server.pid")"
-      return 0
-    fi
-
-    echo "ERROR: No health server script found."
-  else
-    echo "WARNING: Node.js not found. Unable to start placeholder health server."
-  fi
-
-  # Last resort: block on a simple nc listener if available
+# Keep-alive helper
+keep_alive() {
+  echo "[Database] Entering keep-alive mode (no server could be started)."
+  # Try to keep port 5001 bound if nc exists; otherwise, tail.
   if command -v nc >/dev/null 2>&1; then
-    echo "Starting minimal TCP listener with netcat on port ${DB_HEALTH_PORT}..."
+    echo "[Database] Using netcat to bind port ${DB_HEALTH_PORT}."
     while true; do
-      echo -e "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\",\"service\":\"Database\",\"mocked\":true,\"message\":\"Placeholder health server\",\"port\":${DB_HEALTH_PORT}}"
-    done | nc -l -p "${DB_HEALTH_PORT}"
+      printf "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\",\"service\":\"Database\",\"mocked\":true,\"message\":\"Keep-alive placeholder (no Node, no postgres)\",\"port\":%s}\n" "${DB_HEALTH_PORT}"
+    done | nc -lk -p "${DB_HEALTH_PORT}"
   else
-    echo "No available method to start a health server. Exiting with success to keep preview alive."
+    echo "[Database] netcat not available. Falling back to tail -f /dev/null."
+    # This does not bind the port, but keeps container alive as last resort.
+    tail -f /dev/null
   fi
 }
 
-# Detect postgres binaries safely
-PG_BIN_DIR=""
-PG_ISREADY=""
-PSQL_BIN=""
-CREATEDB_BIN=""
-INITDB_BIN=""
+start_health() {
+  echo "[Database] Launching placeholder health server on port ${DB_HEALTH_PORT}..."
+  if command -v node >/dev/null 2>&1; then
+    # Prefer minimal health.js for lightweight footprint
+    if [ -f "${HEALTH_JS}" ]; then
+      DB_HEALTH_PORT="${DB_HEALTH_PORT}" node "${HEALTH_JS}" &
+      echo $! > "${BASE_DIR}/.health_server.pid"
+      echo "[Database] Health server started (health.js) PID $(cat "${BASE_DIR}/.health_server.pid")"
+      wait
+      return 0
+    fi
 
-if command -v postgres >/dev/null 2>&1; then
+    # Fallback to db_visualizer/server.js if present
+    if [ -f "${VIEWER_DIR}/server.js" ]; then
+      PORT="${DB_HEALTH_PORT}" node "${VIEWER_DIR}/server.js" &
+      echo $! > "${BASE_DIR}/.health_server.pid"
+      echo "[Database] Health server started (db_visualizer) PID $(cat "${BASE_DIR}/.health_server.pid")"
+      wait
+      return 0
+    fi
+
+    echo "[Database] ERROR: No health server script found (looked for scripts/health.js and db_visualizer/server.js)"
+  else
+    echo "[Database] WARNING: Node.js not found. Cannot start health.js."
+  fi
+
+  # Last resort: keep-alive with nc/tail
+  keep_alive
+}
+
+start_postgres() {
+  echo "[Database] postgres detected. Starting real PostgreSQL on port ${DB_PORT} using data dir: ${DATA_DIR}"
+
+  # Discover binaries
   PG_BIN_DIR="$(dirname "$(command -v postgres)")"
   PG_ISREADY="$(command -v pg_isready || echo "${PG_BIN_DIR}/pg_isready")"
   PSQL_BIN="$(command -v psql || echo "${PG_BIN_DIR}/psql")"
-  CREATEDB_BIN="$(command -v createdb || echo "${PG_BIN_DIR}/createdb")"
   INITDB_BIN="$(command -v initdb || echo "${PG_BIN_DIR}/initdb")"
-else
-  # Try Ubuntu layout if installed
-  PG_VERSION=$(ls /usr/lib/postgresql/ 2>/dev/null | head -1)
-  if [ -n "$PG_VERSION" ] && [ -d "/usr/lib/postgresql/${PG_VERSION}/bin" ]; then
-    PG_BIN_DIR="/usr/lib/postgresql/${PG_VERSION}/bin"
-    PG_ISREADY="${PG_BIN_DIR}/pg_isready"
-    PSQL_BIN="${PG_BIN_DIR}/psql"
-    CREATEDB_BIN="${PG_BIN_DIR}/createdb"
-    INITDB_BIN="${PG_BIN_DIR}/initdb"
-  fi
-fi
+  CREATEDB_BIN="$(command -v createdb || echo "${PG_BIN_DIR}/createdb")"
 
-# If postgres not available, run placeholder server and exit successfully.
-if [ -z "${PG_BIN_DIR}" ] || [ ! -x "${PG_BIN_DIR}/postgres" ]; then
-  echo "postgres binary not found. Running in placeholder mode."
-  echo "A lightweight health server will respond on port ${DB_HEALTH_PORT}."
-  echo "See Database/README.md for running a real Postgres locally."
-  # Do not exit on errors inside start_health; we want preview to remain alive even if node missing.
-  set +e
-  start_health
-  exit 0
-fi
-
-echo "Found PostgreSQL binaries in: ${PG_BIN_DIR}"
-
-# Check if PostgreSQL is already running on the specified port
-if sudo -u postgres "${PG_ISREADY}" -p "${DB_PORT}" > /dev/null 2>&1; then
-  echo "PostgreSQL is already running on port ${DB_PORT}!"
-  echo "Database: ${DB_NAME}"
-  echo "User: ${DB_USER}"
-  echo "Port: ${DB_PORT}"
-  echo ""
-  echo "To connect to the database, use:"
-  echo "psql -h localhost -U ${DB_USER} -d ${DB_NAME} -p ${DB_PORT}"
-
-  if [ -f "${BASE_DIR}/db_connection.txt" ]; then
-    echo "Or use: $(cat "${BASE_DIR}/db_connection.txt")"
+  # Initialize data dir if needed
+  if [ ! -f "${DATA_DIR}/PG_VERSION" ]; then
+    echo "[Database] Initializing data directory..."
+    "${INITDB_BIN}" -D "${DATA_DIR}"
   fi
 
-  exit 0
-fi
+  # Start postgres in foreground (so container stays alive)
+  echo "[Database] Starting postgres..."
+  "${PG_BIN_DIR}/postgres" -D "${DATA_DIR}" -p "${DB_PORT}" &
+  PG_PID=$!
 
-# Also check if there's a PostgreSQL process running (in case pg_isready fails)
-if pgrep -f "postgres.*-p ${DB_PORT}" > /dev/null 2>&1; then
-  echo "Found existing PostgreSQL process on port ${DB_PORT}"
-  echo "Attempting to verify connection..."
-  if sudo -u postgres "${PSQL_BIN}" -p "${DB_PORT}" -d "${DB_NAME}" -c '\q' 2>/dev/null; then
-    echo "Database ${DB_NAME} is accessible."
-    exit 0
-  fi
-fi
+  # Wait for readiness (best effort)
+  echo "[Database] Waiting for Postgres to become ready..."
+  for i in {1..20}; do
+    if "${PG_ISREADY}" -p "${DB_PORT}" >/dev/null 2>&1; then
+      echo "[Database] Postgres is ready."
+      break
+    fi
+    sleep 1
+  done
 
-# Initialize PostgreSQL data directory if it doesn't exist
-if [ ! -f "/var/lib/postgresql/data/PG_VERSION" ]; then
-  echo "Initializing PostgreSQL..."
-  sudo -u postgres "${INITDB_BIN}" -D /var/lib/postgresql/data
-fi
-
-# Start PostgreSQL server in background
-echo "Starting PostgreSQL server..."
-sudo -u postgres "${PG_BIN_DIR}/postgres" -D /var/lib/postgresql/data -p "${DB_PORT}" &
-
-# Wait for PostgreSQL to start
-echo "Waiting for PostgreSQL to start..."
-for i in {1..15}; do
-  if sudo -u postgres "${PG_ISREADY}" -p "${DB_PORT}" > /dev/null 2>&1; then
-    echo "PostgreSQL is ready!"
-    break
-  fi
-  echo "Waiting... ($i/15)"
-  sleep 2
-done
-
-# Create database and user
-echo "Setting up database and user..."
-sudo -u postgres "${CREATEDB_BIN}" -p "${DB_PORT}" "${DB_NAME}" 2>/dev/null || echo "Database might already exist"
-
-# Set up user and permissions with proper schema ownership
-sudo -u postgres "${PSQL_BIN}" -p "${DB_PORT}" -d postgres << EOF
--- Create user if doesn't exist
-DO \$$
+  # Create database and user (best effort)
+  {
+    "${CREATEDB_BIN}" -p "${DB_PORT}" "${DB_NAME}" 2>/dev/null || true
+    "${PSQL_BIN}" -p "${DB_PORT}" -d postgres <<EOF
+DO \$\$
 BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN
-        CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASSWORD}';
-    END IF;
-    ALTER ROLE ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN
+    CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASSWORD}';
+  END IF;
+  ALTER ROLE ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';
 END
-\$$;
-
--- Grant database-level permissions
+\$\$;
 GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
-
--- Connect to the specific database for schema-level permissions
 \c ${DB_NAME}
-
--- Public schema permissions
-GRANT USAGE ON SCHEMA public TO ${DB_USER};
-GRANT CREATE ON SCHEMA public TO ${DB_USER};
+GRANT USAGE, CREATE ON SCHEMA public TO ${DB_USER};
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO ${DB_USER};
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO ${DB_USER};
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO ${DB_USER};
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TYPES TO ${DB_USER};
-GRANT ALL ON SCHEMA public TO ${DB_USER};
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO ${DB_USER};
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO ${DB_USER};
-GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO ${DB_USER};
 EOF
+  } || echo "[Database] Non-fatal: Failed to fully configure DB/user."
 
-# Double-check in target DB
-sudo -u postgres "${PSQL_BIN}" -p "${DB_PORT}" -d "${DB_NAME}" << EOF
-GRANT ALL ON SCHEMA public TO ${DB_USER};
-GRANT CREATE ON SCHEMA public TO ${DB_USER};
-EOF
+  # Write connection helpers
+  echo "psql postgresql://${DB_USER}:${DB_PASSWORD}@localhost:${DB_PORT}/${DB_NAME}" > "${BASE_DIR}/db_connection.txt"
 
-# Save connection command to a file
-echo "psql postgresql://${DB_USER}:${DB_PASSWORD}@localhost:${DB_PORT}/${DB_NAME}" > "${BASE_DIR}/db_connection.txt"
-echo "Connection string saved to db_connection.txt"
-
-# Save environment variables to a file for the viewer
-mkdir -p "${VIEWER_DIR}"
-cat > "${VIEWER_DIR}/postgres.env" << EOF
+  mkdir -p "${VIEWER_DIR}"
+  cat > "${VIEWER_DIR}/postgres.env" <<EOF
 export POSTGRES_URL="postgresql://localhost:${DB_PORT}/${DB_NAME}"
 export POSTGRES_USER="${DB_USER}"
 export POSTGRES_PASSWORD="${DB_PASSWORD}"
@@ -194,7 +141,17 @@ export POSTGRES_DB="${DB_NAME}"
 export POSTGRES_PORT="${DB_PORT}"
 EOF
 
-echo "PostgreSQL setup complete!"
-echo "Database: ${DB_NAME}"
-echo "User: ${DB_USER}"
-echo "Port: ${DB_PORT}"
+  echo "[Database] PostgreSQL running. PID ${PG_PID}. Listening on port ${DB_PORT}."
+  wait ${PG_PID}
+}
+
+# Main decision branch:
+if command -v postgres >/dev/null 2>&1; then
+  start_postgres
+else
+  echo "[Database] postgres not found. Running placeholder health server on port ${DB_HEALTH_PORT}."
+  echo "[Database] To run a real database locally, see Database/README.md."
+  # Do not crash the container even if health server cannot start.
+  set +e
+  start_health
+fi

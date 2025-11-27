@@ -1,22 +1,38 @@
 # Database Container
 
-This container provides the PostgreSQL data store for the Proto Assistant platform. In this preview environment, the `postgres` binary may not be available. To keep the environment healthy, the container starts a lightweight HTTP health server instead of failing.
+This container provides the PostgreSQL data store for the Proto Assistant platform. In preview environments, the `postgres` binary may not be available. To keep the environment healthy, we DO NOT call `postgres` directly unless it exists. Instead, we start a lightweight HTTP health server on port 5001.
 
 ## Preview Mode (Placeholder)
 
-- Listens on TCP port 5001.
+- Always binds TCP port 5001.
 - Returns HTTP 200 with JSON indicating the database is mocked.
-- No real database is started.
+- No real database is started unless `postgres` is actually installed.
 
 Health endpoint:
 - GET http://localhost:5001/
 - GET http://localhost:5001/health
 
-If Node.js is available, the health server is provided by:
-- Either db_visualizer/server.js (Express app) listening on the specified port
-- Or scripts/health.js (minimal HTTP server)
+Startup behavior:
+1) Entry: ./startup.sh (preferred). Some previews may use server.sh or index.js; both delegate to the same behavior.
+2) Check `command -v postgres`.
+   - If present: start postgres on port 5001, initialize data dir as needed.
+   - If not present: start health server (scripts/health.js) on port 5001.
+3) If Node.js is missing, the script attempts a minimal TCP listener via `nc` (if available). As a last resort it will keep the process alive without binding a port.
 
-If Node.js is not available, the script attempts a very minimal TCP listener (if `nc` exists).
+If Node.js is available, the health server is provided by:
+- scripts/health.js (minimal HTTP server) listening on the specified port.
+- db_visualizer/server.js can also be used as a fallback.
+
+## Quick start (Preview)
+
+- Recommended:
+  ./startup.sh
+
+- If your environment ignores startup.sh:
+  - bash server.sh
+  - or: node index.js
+
+In all cases the service will bind to port 5001.
 
 ## Real PostgreSQL Setup (Local Development)
 
@@ -26,32 +42,30 @@ Environment defaults used by scripts:
 - DB_NAME: myapp
 - DB_USER: appuser
 - DB_PASSWORD: dbuser123
-- DB_PORT: 5000
+- DB_PORT: 5001 (preview requirement)
 
 Steps:
 1) Ensure PostgreSQL is installed and `postgres`, `psql`, `pg_isready`, and `createdb` are on PATH.
 2) Run the startup script:
    ./startup.sh
-   - It will initialize a data directory (if needed)
-   - Start PostgreSQL on port 5000
-   - Create database and user with appropriate privileges
-   - Save a connection string to db_connection.txt
-   - Save environment variables to db_visualizer/postgres.env
+   - Initializes a data directory if needed (Database/.pgdata)
+   - Starts PostgreSQL on port 5001
+   - Creates database and user with appropriate privileges
+   - Saves a connection string to db_connection.txt
+   - Saves environment variables to db_visualizer/postgres.env
 
 To connect with psql:
-psql -h localhost -U appuser -d myapp -p 5000
+psql -h localhost -U appuser -d myapp -p 5001
 or:
 $(cat db_connection.txt)
 
 To populate from the provided dump:
-PGPASSWORD="dbuser123" psql -h localhost -p 5000 -U appuser -d postgres < database_backup.sql
+PGPASSWORD="dbuser123" psql -h localhost -p 5001 -U appuser -d postgres < database_backup.sql
 
 ## Connection details used by BackendAPI
 
 The BackendAPI is expected to use a PostgreSQL connection string like:
-postgresql://appuser:dbuser123@localhost:5000/myapp
-
-In containerized or cloud environments, use the appropriate host and port.
+postgresql://appuser:dbuser123@localhost:5001/myapp
 
 Environment variables commonly used:
 - DATABASE_URL or POSTGRES_URL
