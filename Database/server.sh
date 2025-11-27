@@ -10,7 +10,15 @@ chmod +x "${SCRIPT_DIR}/startup.sh" || true
 chmod +x "${SCRIPT_DIR}/index.js" || true
 chmod +x "${SCRIPT_DIR}/scripts/health.js" || true
 
-# VERY EXPLICIT RUNTIME PATH ECHO
+cat <<'BANNER'
+============================================================
+[Database] Preview Entrypoint: server.sh
+- Guarded start path (NO direct postgres invocation here)
+- Delegates to startup.sh which decides health server vs real DB
+- Target preview/health port: 5001
+============================================================
+BANNER
+
 echo "[Database] server.sh invoked at path: ${SCRIPT_DIR}/server.sh"
 echo "[Database] [ENTRY] Delegating to ${SCRIPT_DIR}/startup.sh ..."
 

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Protective shim: If PATH resolves to this local ./Database/bin/postgres, we redirect to startup.sh.
+# This should NOT override a real postgres installation; ensure this 'bin' is appended to PATH last.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
+
+# If a real postgres exists elsewhere on PATH (not this file), exec it
+if REAL_PG="$(command -v postgres 2>/dev/null)"; then
+  if [ "${REAL_PG}" != "$0" ]; then
+    exec "${REAL_PG}" "$@"
+  fi
+fi
+
+echo "[Database] WARNING: Local shim 'postgres' invoked. Redirecting to startup.sh guard."
+exec bash "${SCRIPT_DIR}/startup.sh"

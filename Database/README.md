@@ -2,6 +2,13 @@
 
 This container provides the PostgreSQL data store for the Proto Assistant platform. In preview environments, the `postgres` binary may not be available. To keep the environment healthy, we DO NOT call `postgres` directly unless it exists. Instead, we start a lightweight HTTP health server on port 5001.
 
+Preview entrypoints and guards:
+- Database/.start (preferred explicit entrypoint; runs bash server.sh)
+- Database/server.sh -> delegates to startup.sh (never calls postgres directly)
+- Database/startup.sh -> checks for postgres, else runs health server on port 5001
+- Database/bin/postgres -> shim that proxies to startup.sh only if no real postgres is found in PATH
+- Database/.profile.d/00-start.sh -> sets DATABASE_PREVIEW_START to .start for platforms that honor profile.d
+
 ## Preview Mode (Placeholder)
 
 - Always binds TCP port 5001.

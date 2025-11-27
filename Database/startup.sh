@@ -11,6 +11,15 @@
 
 set -euo pipefail
 
+cat <<'BANNER'
+============================================================
+[Database] Startup Guard: startup.sh
+- No direct postgres call unless binary detected in PATH
+- Health server binds 0.0.0.0:5001 in placeholder mode
+- Real Postgres uses DATA_DIR=.pgdata and port 5001
+============================================================
+BANNER
+
 DB_NAME="${DB_NAME:-myapp}"
 DB_USER="${DB_USER:-appuser}"
 DB_PASSWORD="${DB_PASSWORD:-dbuser123}"

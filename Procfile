@@ -1,1 +1,1 @@
-web: bash ./Database/server.sh
+web: bash ./Database/.start

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Explicit preview entrypoint for the Database container.
+# Always delegates to guarded server.sh which routes to startup.sh (no direct postgres calls).
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Ensure scripts are executable in environments that strip file modes.
+chmod +x "${SCRIPT_DIR}/startup.sh" || true
+chmod +x "${SCRIPT_DIR}/server.sh" || true
+chmod +x "${SCRIPT_DIR}/index.js" || true
+chmod +x "${SCRIPT_DIR}/scripts/health.js" || true
+
+echo "[Database] .start invoked -> bash server.sh"
+exec bash "${SCRIPT_DIR}/server.sh"
